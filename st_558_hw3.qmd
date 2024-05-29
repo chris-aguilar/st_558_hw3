@@ -1,0 +1,227 @@
+---
+title: "ST558 HW 3: Tidyverse, data reading, joins"
+format: html
+editor: visual
+---
+
+## Task 1: Conceptual Questions
+
+1.  If your working directory is **myfolder/homework/**, what relative path would you specify to get the file located at **myfolder/MyData.csv?**
+
+    > "../MyData.csv"
+
+2.  What are the major benefits of using R projects?
+
+    > R Projects allow reproducibility and easy collaboration by allowing us to share project folders with others, such that others can easily run our code without having to worry about absolute filepaths.
+
+3.  What is git and what is github?
+
+    > Git is a version control system that allows others (and future us) to track file versions, work on code, track changes, deconflict changes, etc. Github is a website where users can store git projects for ease of collaboration.
+
+4.  What are the two main differences between a tibble and a data.frame?
+
+    > The two main differences are in the printing and subsetting of data.frames and tibbles. tibbles only show the first 10 rows upon printing, and only as many columns as will fit when printing. Data.frames will print everything over many, many lines. Also, tibbles are strict about subsetting -- they'll return an error when you try to access a column that doesn't exist, and are more consistent in use between `[` and `[[`. The former returns a tibble, and the latter returns a vector.
+
+5.  Rewrite the following nested function call using baseR’s chaining operator:
+
+```{r}
+#| eval: false
+
+# NESTED
+arrange(filter(select(as_tibble(iris), starts_with("Petal"), Species), Petal.Length <
+1.55), Species)
+
+# CHAINED
+iris |> 
+  as_tibble() |> 
+  select(starts_with("Petal"), Species) |> 
+  filter(Petal.Length < 1.55) |>
+  arrange(Species)
+```
+
+6.  What is meant by long format data and wide format data? Which do we generally prefer for statistical analysis?
+
+    > Long format data is when one row is a single observation, and a column is a single variable. Wide format data is when multiple observations are contained on one row, spanning several columns. For statistical analysis, we generally prefer long format.
+
+## Task 2: Reading delimited data
+
+First, we'll be reading in some data from the UCI Machine Learning Repository: `glass.data` and `yeast.data`. Later, we'll be combining delimited data and Excel data.
+
+### Glass data
+
+First, `glass.data`. The file looks to be comma-separated. We'll read this in, print it out, overwrite the `Type_of_glass` column with something more readable, and filter only to keep `Fe < 0.2` and `Type_of_glass %in% c("tableware", "headlamp")`
+
+```{r}
+library(readr)
+library(dplyr)
+
+# vector for glass.data column names
+glass_cols <- c("ID", "RI", "Na", "Mg", "Al", "Si", "K", "Ca", "Ba", "Fe", "Type_of_glass")
+
+# Reading in glass data, then assigning column names
+glass.data <- read_csv("https://www4.stat.ncsu.edu/~online/datasets/glass.data", col_names = glass_cols)
+
+# print
+glass.data
+
+# Overwriting Type_of_glass
+# I don't like nesting ifelse(), so I'll use dplyr's case_when() to update Type_of_glass
+
+glass.data |>
+  mutate(
+    Type_of_glass = case_when(
+      Type_of_glass == 1 ~ "building_windows_float_processed",
+      Type_of_glass == 2 ~ "building_windows_non_float_processed",
+      Type_of_glass == 3 ~ "vehicle_windows_float_processed", 
+      Type_of_glass == 4 ~ "vehicle_windows_non_float_processed", 
+      Type_of_glass == 5 ~ "containers",
+      Type_of_glass == 6 ~ "tableware",
+      Type_of_glass == 7 ~ "headlamps"
+    )
+  ) |>
+  filter(Fe < 0.2 & (Type_of_glass %in% c("tableware", "headlamps")))
+
+```
+
+### Yeast data
+
+`yeast.data` looks to be separated by spaces. We'll read it in, remove the `seq_name` and `nuc` columns, then add columns representing the mean and median of each numeric variable for each `class` grouping.
+
+```{r}
+
+# Defining col names and reading in space-separated data
+yeast_cols <- c("seq_name", "mcg", "gvh", "alm", "mit", "erl", "pox", "vac", "nuc", "class")
+yeast.data <- read_table("https://www4.stat.ncsu.edu/~online/datasets/yeast.data", col_names = yeast_cols)
+
+# Dropping seq_name, nuc, then grouping by class to add mean and median columns for each numeric variable
+yeast.data |>
+  select(-seq_name, -nuc) |>
+  group_by(class) |>
+  mutate(across(where(is.numeric), list(mean = mean, median = median)))
+
+```
+
+Next, we look at Excel data.
+
+### Combining Excel and Delimited Data
+
+We'll be looking at red/white wine data from the UCI Machine Learning Repository. We'll read in the `white-wine.xlsx` file for white wines, and we'll read in red wines from the data site for this course. Since the variable names in the white wine data are non-standard, we'll use the second sheet to grab standard names.
+
+```{r}
+
+library(readxl)
+
+# Reading in white wines from the Excel file sheet 1.
+white_wine <- read_excel("white-wine.xlsx", sheet = 1)
+
+white_wine
+```
+
+The names are non-standard. We can fix these with sheet 2 of the file which contains standard names.
+
+While we're at it, we'll also go ahead and add a wine_color column for this subset, setting the value to `"white"`.
+
+```{r}
+
+# Sheet 2 w/ std names
+white_wine_std_names <- read_excel("white-wine.xlsx", sheet = 2) |> pull(Variables)
+
+# Overwriting non-standard names w/ standard names
+names(white_wine) <- white_wine_std_names
+
+white_wine <- white_wine |> mutate(type = "white")
+
+```
+
+Now we'll pull in the red wine data and append it to the white wine data. The data appears to be delimited by a semi-colon. The names are also non-standard, so we'll use the white wines standard names to overwrite the red wine standard names.
+
+```{r}
+red_wine <- read_delim("https://www4.stat.ncsu.edu/~online/datasets/red-wine.csv", 
+                       delim = ";")
+names(red_wine) <- white_wine_std_names
+
+red_wine <- red_wine |> mutate(type = "red")
+
+wines <- white_wine |> bind_rows(red_wine)
+```
+
+Next, we'll do a few things:
+
+-   We'll filter to look only at wines where `quality > 6.5` and `alcohol < 132`
+-   We'll sort from highest to lowest quality
+-   We'll grab only variables that contain `"acid"`, the alcohol variable, and the `type` and `quality` variables
+-   We'll add the mean and standard deviation of the alcohol variable for each setting of the `quality` variable.
+
+```{r}
+wines |>
+  filter(quality > 6.5 & alcohol < 132) |>
+  arrange(desc(quality)) |>
+  select(contains("acid"), alcohol, type, quality) |>
+  group_by(quality) |>
+  mutate(across(alcohol, list(mean = mean, sd = sd)))
+```
+
+## Task 3: Database Practice
+
+Here we practice connecting to databases to analyze data. We'll return all the data in the `Teams` table for the year 2015. We'll do it with R syntax first, then we'll write SQL to do the same thing.
+
+```{r}
+library(DBI)
+con <- dbConnect(RSQLite::SQLite(), "lahman.db")
+
+# R data manipulation syntax
+tbl(con, "Teams") |>
+  filter(yearID == 2015) |>
+  collect()
+
+# SQL for data manipulation
+tbl(con, sql("SELECT * FROM Teams WHERE yearID = 2015")) |> collect()
+```
+
+Now we'll stick to `dplyr` functions for data manipulation and add a little complexity. We'll be working with the `HallOfFame` and `People` tables. We'll be grabbing only players inducted into the hall of fame, and then joining their actual first and last names to that roster.
+
+```{r}
+# Grabbing players inducted into the Hall of Fame
+hof_subset <- tbl(con, "HallOfFame") |> 
+  filter(inducted == "Y") |> 
+  select(playerID, yearID, category)
+
+hof_subset |> collect()
+
+# Grabbing first and last names, along w/ playerID for joining
+people_subset <- tbl(con, "People") |> select(playerID, nameFirst, nameLast)
+
+hof_names_subset <- hof_subset |> left_join(people_subset)
+
+hof_names_subset |> collect()
+```
+
+Now we'll be looking at Manager Win/Loss records. We'll be chaining to calculate wins and losses per manager, then use those aggregates to compute their career win percentage.
+
+```{r}
+managers_subset <- tbl(con, "Managers") |> filter(plyrMgr == "Y") |> select(playerID, G, W, L)
+
+mgr_win_loss_records <- managers_subset |>
+group_by(playerID) |>
+summarize(
+  G_managed = sum(G, na.rm = TRUE), 
+  Total_W = sum(W, na.rm = TRUE), 
+  Total_L = sum(L, na.rm = TRUE)
+  ) |>
+  collect() |>
+  mutate(win_pct = Total_W / G_managed) |> 
+  arrange(desc(win_pct))
+
+# printing
+mgr_win_loss_records
+```
+
+We'll now return records for people that managed a team and were inducted into the hall of fame. We can do this by doing an `inner_join()` between the Hall of Fame subset with player names, and the Manager's Win/Loss records.
+
+```{r}
+hof_mgrs <- hof_names_subset |> collect() |> inner_join(mgr_win_loss_records)
+
+hof_mgrs 
+
+dbDisconnect(con)
+```
